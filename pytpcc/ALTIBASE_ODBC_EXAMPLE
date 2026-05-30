@@ -1,0 +1,8 @@
+[altibase]
+dsn = ALTIBASE_LOCAL
+user = PYTPCC
+password = PYTPCC
+connection-timeout = 5
+max-retries = 20
+retry-delay = 0.1
+fast-executemany = False
