@@ -254,8 +254,8 @@ class Results:
                 ('false', 'true')[driver.all_in_one_txn], ('false', 'true')[driver.retry_writes],total_cnt,total_aborts, samewh, ('false', 'true')[driver.no_global_items])
             driver.save_result(result_doc)
             print(result_doc)
-        # PostgreSQL driver returns a shorter version of the summary without extra configuration data
-        elif driver.__class__.__name__ == "PostgresqlDriver" or driver.__class__.__name__ == "PostgresqljsonbDriver":
+        # SQL drivers return a shorter summary without extra configuration data.
+        elif driver.__class__.__name__ in ("PostgresqlDriver", "PostgresqljsonbDriver", "AltibaseDriver"):
             ret += "\n%s TpmC for %s thr %d WH: %d %d total %d durSec, %d retries %s%% p50 %s p75 %s p90 %s p95 %s p99 %s max %s %d %d" % (
                 time.strftime("%Y-%m-%d %H:%M:%S"),
                 threads,

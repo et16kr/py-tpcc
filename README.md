@@ -16,6 +16,64 @@ The structure of the repo is:
 All the tests were run using [MongoDB Atlas](https://www.mongodb.com/cloud/atlas?jmp=VLDB2019).
 Use code `VLDB2019` to get $150 credit to get started with MongoDB Atlas.
 
+## Altibase pyodbc Baseline
+
+The Altibase target currently supports only the `pyodbc` path. Native
+`altibase-python-driver` support is intentionally out of scope for this
+baseline. For implementation notes and known compatibility constraints, see
+[`ALTIBASE_PYODBC_EXECUTION_DESIGN.md`](ALTIBASE_PYODBC_EXECUTION_DESIGN.md).
+
+The pyodbc configuration is DSN based. Define an ODBC DSN such as
+`ALTIBASE_LOCAL`, keep `ALTIBASE_PORT_NO` in the environment for the Altibase
+ODBC driver, and run from `pytpcc/`:
+
+```bash
+cd pytpcc
+```
+
+Reset-only smoke, run twice to verify repeatable schema reset:
+
+```bash
+ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
+ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
+LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
+python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
+  --reset --no-load --no-execute altibase --debug
+```
+
+Load-only smoke:
+
+```bash
+ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
+ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
+LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
+python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
+  --reset --no-execute --warehouses 1 --scalefactor 100 \
+  --duration 10 --clients 1 altibase --stop-on-error --debug
+```
+
+Execute-only smoke:
+
+```bash
+ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
+ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
+LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
+python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
+  --no-load --warehouses 1 --scalefactor 100 \
+  --duration 30 --clients 1 altibase --stop-on-error --debug
+```
+
+Combined reset/load/execute smoke:
+
+```bash
+ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
+ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
+LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
+python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
+  --reset --warehouses 1 --scalefactor 100 \
+  --duration 30 --clients 1 altibase --stop-on-error
+```
+
 ## Sharded MongoDB Driver
 
 1. Create ana activate a python env.

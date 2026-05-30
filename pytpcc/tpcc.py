@@ -350,6 +350,9 @@ if __name__ == '__main__':
     # Pass starting_warehouse to config for sharding setup coordination
     config['starting_warehouse'] = args.get('starting_warehouse', 1)
     driver.loadConfig(config)
+    if args['clients'] == 1 and hasattr(driver, "cleanup"):
+        import atexit
+        atexit.register(driver.cleanup)
     logging.info("Initializing TPC-C benchmark using %s", driver)
 
     ## Create ScaleParameters
