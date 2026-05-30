@@ -256,8 +256,11 @@ class Results:
             print(result_doc)
         # SQL drivers return a shorter summary without extra configuration data.
         elif driver.__class__.__name__ in ("PostgresqlDriver", "PostgresqljsonbDriver", "AltibaseDriver"):
-            ret += "\n%s TpmC for %s thr %d WH: %d %d total %d durSec, %d retries %s%% p50 %s p75 %s p90 %s p95 %s p99 %s max %s %d %d" % (
+            summary_label = driver.getSummaryLabel() if hasattr(driver, "getSummaryLabel") else None
+            summary_prefix = ("%s " % summary_label) if summary_label else ""
+            ret += "\n%s %sTpmC for %s thr %d WH: %d %d total %d durSec, %d retries %s%% p50 %s p75 %s p90 %s p95 %s p99 %s max %s %d %d" % (
                 time.strftime("%Y-%m-%d %H:%M:%S"),
+                summary_prefix,
                 threads,
                 driver.getNumberWH(),
                 round(txn_new_order*60/duration), txn_new_order, duration,

@@ -37,7 +37,7 @@
 | `J003` | `Done` | TPC-C transaction implementation | Implement and validate the five TPC-C transaction methods for Altibase using qmark SQL, bounded retry, rollback handling, and correct New Order abort behavior. |
 | `J004` | `Done` | Results integration and smoke runs | Integrate Altibase into result summaries, add single-client cleanup, run reset/load/execute smoke checks, update docs, and commit the verified baseline. |
 | `J005` | `Done` | Native Altibase driver backend | Extend the Altibase TPC-C target so it can run through `/home/et16/work/altibase-python-driver` while preserving the pyodbc baseline. |
-| `J006` | `ToDo` | pyodbc/native comparison runs | Run comparable pyodbc and native Altibase TPC-C smoke/performance runs, capture the results, and document how to repeat the comparison. |
+| `J006` | `Done` | pyodbc/native comparison runs | Run comparable pyodbc and native Altibase TPC-C smoke/performance runs, capture the results, and document how to repeat the comparison. |
 
 ## Resume Rules
 

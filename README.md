@@ -27,7 +27,9 @@ the backend in the config file:
 
 For implementation notes and known compatibility constraints, see
 [`ALTIBASE_PYODBC_EXECUTION_DESIGN.md`](ALTIBASE_PYODBC_EXECUTION_DESIGN.md)
-and [`ALTIBASE_TEST_NOTES.md`](ALTIBASE_TEST_NOTES.md).
+and [`ALTIBASE_TEST_NOTES.md`](ALTIBASE_TEST_NOTES.md). For the local
+pyodbc/native comparison commands and measured smoke results, see
+[`ALTIBASE_BACKEND_COMPARISON.md`](ALTIBASE_BACKEND_COMPARISON.md).
 
 For pyodbc, define an ODBC DSN such as `ALTIBASE_LOCAL` and keep
 `ALTIBASE_PORT_NO` in the environment for the Altibase ODBC driver. For native,

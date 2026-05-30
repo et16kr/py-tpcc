@@ -479,6 +479,11 @@ class AltibaseDriver(AbstractDriver):
         self.cursor.execute("SELECT MAX(W_ID) FROM WAREHOUSE")
         return self.cursor.fetchone()[0]
 
+    def getSummaryLabel(self):
+        if self.backend:
+            return "Altibase(%s)" % self.backend
+        return "Altibase"
+
     def doDelivery(self, params):
         retries = 0
         q = TXN_QUERIES["DELIVERY"]
