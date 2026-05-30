@@ -1,4 +1,5 @@
 [altibase]
+backend = pyodbc
 dsn = ALTIBASE_LOCAL
 user = PYTPCC
 password = PYTPCC

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
+from decimal import Decimal
 import logging
+import os
 import re
 from pprint import pformat
 from time import sleep
@@ -70,10 +72,15 @@ TXN_QUERIES = {
 
 class AltibaseDriver(AbstractDriver):
     DEFAULT_CONFIG = {
-        "dsn": ("The Altibase ODBC DSN", "ALTIBASE_LOCAL"),
+        "backend": ("The Altibase connection backend: pyodbc or native", "pyodbc"),
+        "dsn": ("The Altibase ODBC DSN for backend=pyodbc", "ALTIBASE_LOCAL"),
+        "host": ("The Altibase host for backend=native", "127.0.0.1"),
+        "port-env": ("The environment variable containing the Altibase port for backend=native", "ALTIBASE_PORT_NO"),
         "user": ("The username to connect to Altibase", "PYTPCC"),
         "password": ("The password to connect to Altibase", "PYTPCC"),
-        "connection-timeout": ("The pyodbc connection timeout in seconds", "5"),
+        "nls-use": ("The Altibase NLS_USE value for backend=native", "US7ASCII"),
+        "connection-timeout": ("The pyodbc connection timeout in seconds for backend=pyodbc", "5"),
+        "connect-timeout": ("The native driver connect timeout in seconds for backend=native", "5"),
         "max-retries": ("The maximum transaction retry count", "20"),
         "retry-delay": ("The base transaction retry delay in seconds", "0.1"),
         "fast-executemany": ("Enable pyodbc cursor.fast_executemany during load", "False"),
@@ -94,6 +101,7 @@ class AltibaseDriver(AbstractDriver):
     TRUE_VALUES = set(["1", "yes", "true", "on"])
     FALSE_VALUES = set(["0", "no", "false", "off"])
     DETERMINISTIC_EXCEPTION_TYPES = (AssertionError, AttributeError, IndexError, KeyError, TypeError, ValueError)
+    DETERMINISTIC_DBAPI_EXCEPTION_NAMES = set(["DataError", "IntegrityError", "InterfaceError", "NotSupportedError", "ProgrammingError"])
     DETERMINISTIC_SQLSTATE_PREFIXES = ("07", "21", "22", "23", "42")
     DETERMINISTIC_SQLSTATES = set(["HY004", "HY024", "HYC00", "IM001", "IM002"])
     DETERMINISTIC_MESSAGE_PATTERNS = [
@@ -116,10 +124,16 @@ class AltibaseDriver(AbstractDriver):
         super(AltibaseDriver, self).__init__("altibase", ddl)
         self.conn = None
         self.cursor = None
+        self.backend = None
         self.dsn = None
+        self.host = None
+        self.port_env = None
+        self.native_port = None
         self.user = None
         self.password = None
+        self.nls_use = None
         self.connection_timeout = None
+        self.connect_timeout = None
         self.max_retries = None
         self.retry_delay = None
         self.fast_executemany = None
@@ -128,20 +142,32 @@ class AltibaseDriver(AbstractDriver):
         return AltibaseDriver.DEFAULT_CONFIG
 
     def loadConfig(self, config):
-        for key in AltibaseDriver.DEFAULT_CONFIG.keys():
-            assert key in config, "Missing parameter '%s' in %s configuration" % (key, self.name)
+        config = self._config_with_defaults(config)
 
-        self.dsn = str(config["dsn"])
+        self.backend = str(config["backend"]).strip().lower()
+        if self.backend not in ("pyodbc", "native"):
+            raise ValueError("Invalid Altibase backend %r; expected 'pyodbc' or 'native'" % (config["backend"],))
+
         self.user = str(config["user"])
         self.password = str(config["password"])
-        self.connection_timeout = self._parse_int(config["connection-timeout"], "connection-timeout")
         self.max_retries = self._parse_int(config["max-retries"], "max-retries")
         self.retry_delay = self._parse_float(config["retry-delay"], "retry-delay")
-        self.fast_executemany = self._parse_bool(config["fast-executemany"], "fast-executemany")
         if self.max_retries < 0:
             raise ValueError("Invalid integer for 'max-retries': %r" % (self.max_retries,))
         if self.retry_delay < 0:
             raise ValueError("Invalid float for 'retry-delay': %r" % (self.retry_delay,))
+
+        if self.backend == "pyodbc":
+            self.dsn = str(config["dsn"])
+            self.connection_timeout = self._parse_int(config["connection-timeout"], "connection-timeout")
+            self.fast_executemany = self._parse_bool(config["fast-executemany"], "fast-executemany")
+        else:
+            self.host = str(config["host"]).strip()
+            self.port_env = str(config["port-env"]).strip()
+            self.native_port = self._read_native_port(self.port_env)
+            self.nls_use = str(config["nls-use"]).strip()
+            self.connect_timeout = self._parse_int(config["connect-timeout"], "connect-timeout")
+            self.fast_executemany = False
 
         self.conn = self._connect()
         self.cursor = self.conn.cursor()
@@ -155,15 +181,53 @@ class AltibaseDriver(AbstractDriver):
                 self.conn.rollback()
                 raise
 
+    def _config_with_defaults(self, config):
+        resolved = dict((key, value[1]) for key, value in AltibaseDriver.DEFAULT_CONFIG.items())
+        resolved.update(config)
+        return resolved
+
     def _connect(self):
+        if self.backend == "native":
+            return self._connect_native()
+        return self._connect_pyodbc()
+
+    def _connect_pyodbc(self):
         try:
             import pyodbc
         except ImportError as ex:
-            raise ImportError("AltibaseDriver requires pyodbc to connect. Install pyodbc or use --print-config without loading.") from ex
+            raise ImportError("AltibaseDriver backend=pyodbc requires pyodbc to connect. Install pyodbc or choose backend=native.") from ex
 
         connection_string = "DSN=%s;UID=%s;PWD=%s" % (self.dsn, self.user, self.password)
         logging.debug("Connecting to Altibase DSN '%s' as user '%s'", self.dsn, self.user)
         return pyodbc.connect(connection_string, timeout=self.connection_timeout)
+
+    def _connect_native(self):
+        try:
+            import altibase
+        except ImportError as ex:
+            raise ImportError(
+                "AltibaseDriver backend=native requires the altibase package. "
+                "Set PYTHONPATH=/home/et16/work/altibase-python-driver/src or install the package."
+            ) from ex
+
+        options = {
+            "host": self.host,
+            "port": self.native_port,
+            "user": self.user,
+            "password": self.password,
+            "connect_timeout": self.connect_timeout,
+        }
+        if self.nls_use:
+            options["nls_use"] = self.nls_use
+
+        logging.debug(
+            "Connecting to Altibase native host '%s' port %d as user '%s' nls-use '%s'",
+            self.host,
+            self.native_port,
+            self.user,
+            self.nls_use or "",
+        )
+        return altibase.connect(**options)
 
     def _reset_schema(self):
         for table_name in AltibaseDriver.DROP_TABLES:
@@ -194,17 +258,27 @@ class AltibaseDriver(AbstractDriver):
         return [statement.strip() for statement in "\n".join(lines).split(";") if statement.strip()]
 
     def _is_table_not_found_error(self, ex):
-        for arg in getattr(ex, "args", []):
-            if arg == 200753:
-                return True
-            text = str(arg)
-            if text == "42S02" or text.startswith("42S02"):
-                return True
-            if re.search(r"(^|[^0-9])200753([^0-9]|$)", text):
-                return True
-            if "42S02" in text:
-                return True
+        if "42S02" in self._extract_sqlstates(ex):
+            return True
+        if 200753 in self._extract_vendor_codes(ex):
+            return True
+        message = " ".join(str(arg) for arg in getattr(ex, "args", [ex]))
+        if "42S02" in message or re.search(r"(^|[^0-9])200753([^0-9]|$)", message):
+            return True
         return False
+
+    def _read_native_port(self, env_name):
+        if not env_name:
+            raise ValueError("Altibase backend=native requires a non-empty 'port-env' setting")
+        value = os.environ.get(env_name)
+        if value is None or str(value).strip() == "":
+            raise ValueError(
+                "Altibase backend=native requires environment variable '%s' to contain the TCP port" % env_name
+            )
+        port = self._parse_int(value, env_name)
+        if port <= 0 or port > 65535:
+            raise ValueError("Invalid TCP port in '%s': %r" % (env_name, value))
+        return port
 
     def _parse_int(self, value, name):
         try:
@@ -243,6 +317,11 @@ class AltibaseDriver(AbstractDriver):
         assert len(customers) > 0, "No matching customer for %s" % description
         return customers[(len(customers) - 1) // 2]
 
+    def _match_numeric_type(self, reference, value):
+        if isinstance(reference, Decimal) and not isinstance(value, Decimal):
+            return Decimal(str(value))
+        return value
+
     def _handle_transaction_exception(self, txn_name, ex, retries):
         try:
             self.conn.rollback()
@@ -253,12 +332,11 @@ class AltibaseDriver(AbstractDriver):
         vendor_codes = self._extract_vendor_codes(ex)
         deterministic = self._is_deterministic_error(ex, sqlstates)
         logging.warning(
-            "Altibase %s failed after %d retries; SQLSTATE=%s vendor=%s deterministic=%s: %s",
+            "Altibase %s failed after %d retries; deterministic=%s; %s: %s",
             txn_name,
             retries,
-            sqlstates or "-",
-            vendor_codes or "-",
             deterministic,
+            self._format_exception_details(ex, sqlstates, vendor_codes),
             ex,
         )
 
@@ -273,28 +351,85 @@ class AltibaseDriver(AbstractDriver):
             sleep(retries * self.retry_delay)
         return retries
 
+    def _format_exception_details(self, ex, sqlstates, vendor_codes):
+        details = []
+        if sqlstates:
+            details.append("SQLSTATE=%s" % ",".join(sqlstates))
+        if vendor_codes:
+            details.append("vendor=%s" % ",".join(str(code) for code in vendor_codes))
+        diagnostic_records = self._diagnostic_records(ex)
+        if diagnostic_records:
+            details.append("diagnostic-records=%d" % len(diagnostic_records))
+        return "; ".join(details) if details else "no SQL diagnostics"
+
     def _extract_sqlstates(self, ex):
         sqlstates = []
+        for attr in ("sqlstate", "sql_state", "SQLSTATE"):
+            self._append_sqlstate(sqlstates, getattr(ex, attr, None))
+        for record in self._diagnostic_records(ex):
+            for key, value in record.items():
+                if str(key).lower() in ("sqlstate", "sql_state"):
+                    self._append_sqlstate(sqlstates, value)
         for arg in getattr(ex, "args", []):
             text = str(arg).upper()
             for state in re.findall(r"\b([0-9A-Z]{5})\b", text):
-                if (state[:2].isdigit() or state.startswith("HY") or state.startswith("IM")) and state not in sqlstates:
-                    sqlstates.append(state)
+                self._append_sqlstate(sqlstates, state)
         return sqlstates
 
     def _extract_vendor_codes(self, ex):
         codes = []
+        for attr in ("vendor_code", "code", "native_code", "error_code"):
+            self._append_vendor_code(codes, getattr(ex, attr, None))
+        for record in self._diagnostic_records(ex):
+            for key, value in record.items():
+                if str(key).lower() in ("vendor_code", "code", "native_code", "error_code"):
+                    self._append_vendor_code(codes, value)
         for arg in getattr(ex, "args", []):
-            if isinstance(arg, int) and arg not in codes:
-                codes.append(arg)
-                continue
-            for code in re.findall(r"\((-?\d{5,})\)", str(arg)):
-                if code not in codes:
-                    codes.append(code)
+            self._append_vendor_code(codes, arg)
         return codes
+
+    def _append_sqlstate(self, sqlstates, value):
+        if value is None:
+            return
+        state = str(value).strip().upper()
+        if not re.match(r"^[0-9A-Z]{5}$", state):
+            return
+        if not (state[:2].isdigit() or state.startswith("HY") or state.startswith("IM")):
+            return
+        if state not in sqlstates:
+            sqlstates.append(state)
+
+    def _append_vendor_code(self, codes, value):
+        if value is None or isinstance(value, bool):
+            return
+        if isinstance(value, int):
+            code = value
+        else:
+            text = str(value).strip()
+            if re.match(r"^-?\d+$", text):
+                code = int(text)
+            else:
+                for match in re.findall(r"\((-?\d{5,})\)", text):
+                    self._append_vendor_code(codes, int(match))
+                return
+        if code not in codes:
+            codes.append(code)
+
+    def _diagnostic_records(self, ex):
+        records = getattr(ex, "diagnostic_records", None)
+        if records is None:
+            return []
+        if isinstance(records, dict):
+            return [records]
+        try:
+            return [record for record in records if isinstance(record, dict)]
+        except TypeError:
+            return []
 
     def _is_deterministic_error(self, ex, sqlstates):
         if isinstance(ex, AltibaseDriver.DETERMINISTIC_EXCEPTION_TYPES):
+            return True
+        if ex.__class__.__name__ in AltibaseDriver.DETERMINISTIC_DBAPI_EXCEPTION_NAMES:
             return True
         for state in sqlstates:
             if state in AltibaseDriver.DETERMINISTIC_SQLSTATES:
@@ -548,8 +683,9 @@ class AltibaseDriver(AbstractDriver):
                     selected_c_id = customer[0]
                 assert selected_c_id is not None
 
-                c_balance = customer[14] - h_amount
-                c_ytd_payment = customer[15] + h_amount
+                h_amount_db = self._match_numeric_type(customer[14], h_amount)
+                c_balance = customer[14] - h_amount_db
+                c_ytd_payment = customer[15] + self._match_numeric_type(customer[15], h_amount)
                 c_payment_cnt = customer[16] + 1
                 c_data = customer[17]
 
@@ -559,8 +695,8 @@ class AltibaseDriver(AbstractDriver):
                 self.cursor.execute(q["getDistrict"], [w_id, d_id])
                 district = self._fetchone_required("DISTRICT row for payment")
 
-                self.cursor.execute(q["updateWarehouseBalance"], [h_amount, w_id])
-                self.cursor.execute(q["updateDistrictBalance"], [h_amount, w_id, d_id])
+                self.cursor.execute(q["updateWarehouseBalance"], [h_amount_db, w_id])
+                self.cursor.execute(q["updateDistrictBalance"], [h_amount_db, w_id, d_id])
 
                 if customer[11] == constants.BAD_CREDIT:
                     new_data = " ".join(map(str, [selected_c_id, c_d_id, c_w_id, d_id, w_id, h_amount]))
@@ -573,7 +709,7 @@ class AltibaseDriver(AbstractDriver):
                     self.cursor.execute(q["updateGCCustomer"], [c_balance, c_ytd_payment, c_payment_cnt, c_w_id, c_d_id, selected_c_id])
 
                 h_data = "%s    %s" % (warehouse[0], district[0])
-                self.cursor.execute(q["insertHistory"], [selected_c_id, c_d_id, c_w_id, d_id, w_id, h_date, h_amount, h_data])
+                self.cursor.execute(q["insertHistory"], [selected_c_id, c_d_id, c_w_id, d_id, w_id, h_date, h_amount_db, h_data])
 
                 self.conn.commit()
                 return ([warehouse, district, customer], retries)

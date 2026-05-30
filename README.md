@@ -16,22 +16,33 @@ The structure of the repo is:
 All the tests were run using [MongoDB Atlas](https://www.mongodb.com/cloud/atlas?jmp=VLDB2019).
 Use code `VLDB2019` to get $150 credit to get started with MongoDB Atlas.
 
-## Altibase pyodbc Baseline
+## Altibase Backends
 
-The Altibase target currently supports only the `pyodbc` path. Native
-`altibase-python-driver` support is intentionally out of scope for this
-baseline. For implementation notes and known compatibility constraints, see
-[`ALTIBASE_PYODBC_EXECUTION_DESIGN.md`](ALTIBASE_PYODBC_EXECUTION_DESIGN.md).
+The Altibase target is selected as `altibase` for both connection paths. Choose
+the backend in the config file:
 
-The pyodbc configuration is DSN based. Define an ODBC DSN such as
-`ALTIBASE_LOCAL`, keep `ALTIBASE_PORT_NO` in the environment for the Altibase
-ODBC driver, and run from `pytpcc/`:
+- `pytpcc/ALTIBASE_ODBC_EXAMPLE`: `backend = pyodbc`, DSN-based connection.
+- `pytpcc/ALTIBASE_NATIVE_EXAMPLE`: `backend = native`, keyword connection
+  through `/home/et16/work/altibase-python-driver`.
+
+For implementation notes and known compatibility constraints, see
+[`ALTIBASE_PYODBC_EXECUTION_DESIGN.md`](ALTIBASE_PYODBC_EXECUTION_DESIGN.md)
+and [`ALTIBASE_TEST_NOTES.md`](ALTIBASE_TEST_NOTES.md).
+
+For pyodbc, define an ODBC DSN such as `ALTIBASE_LOCAL` and keep
+`ALTIBASE_PORT_NO` in the environment for the Altibase ODBC driver. For native,
+set `PYTHONPATH=/home/et16/work/altibase-python-driver/src` unless the package
+is installed, and keep `ALTIBASE_PORT_NO` set because `port-env` reads it by
+default. If the benchmark schema credentials differ locally, use an untracked
+local config file.
+
+Run from `pytpcc/`:
 
 ```bash
 cd pytpcc
 ```
 
-Reset-only smoke, run twice to verify repeatable schema reset:
+Pyodbc reset-only smoke, run twice to verify repeatable schema reset:
 
 ```bash
 ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
@@ -41,35 +52,52 @@ python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
   --reset --no-load --no-execute altibase --debug
 ```
 
-Load-only smoke:
+Native reset-only smoke:
 
 ```bash
 ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
 ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
 LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
-python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
+PYTHONPATH=/home/et16/work/altibase-python-driver/src:${PYTHONPATH:-} \
+python3 tpcc.py --config ALTIBASE_NATIVE_EXAMPLE --ddl tpcc_altibase.sql \
+  --reset --no-load --no-execute altibase --debug
+```
+
+Load-only smoke, using either config file:
+
+```bash
+CONFIG=ALTIBASE_ODBC_EXAMPLE
+ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
+ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
+LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
+PYTHONPATH=/home/et16/work/altibase-python-driver/src:${PYTHONPATH:-} \
+python3 tpcc.py --config "$CONFIG" --ddl tpcc_altibase.sql \
   --reset --no-execute --warehouses 1 --scalefactor 100 \
   --duration 10 --clients 1 altibase --stop-on-error --debug
 ```
 
-Execute-only smoke:
+Execute-only smoke, using the same config selected for load:
 
 ```bash
+CONFIG=ALTIBASE_ODBC_EXAMPLE
 ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
 ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
 LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
-python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
+PYTHONPATH=/home/et16/work/altibase-python-driver/src:${PYTHONPATH:-} \
+python3 tpcc.py --config "$CONFIG" --ddl tpcc_altibase.sql \
   --no-load --warehouses 1 --scalefactor 100 \
   --duration 30 --clients 1 altibase --stop-on-error --debug
 ```
 
-Combined reset/load/execute smoke:
+Combined reset/load/execute smoke, using either config file:
 
 ```bash
+CONFIG=ALTIBASE_ODBC_EXAMPLE
 ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
 ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
 LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
-python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
+PYTHONPATH=/home/et16/work/altibase-python-driver/src:${PYTHONPATH:-} \
+python3 tpcc.py --config "$CONFIG" --ddl tpcc_altibase.sql \
   --reset --warehouses 1 --scalefactor 100 \
   --duration 30 --clients 1 altibase --stop-on-error
 ```

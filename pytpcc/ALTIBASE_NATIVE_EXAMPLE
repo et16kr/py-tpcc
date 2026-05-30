@@ -1,0 +1,10 @@
+[altibase]
+backend = native
+host = 127.0.0.1
+port-env = ALTIBASE_PORT_NO
+user = PYTPCC
+password = PYTPCC
+nls-use = US7ASCII
+connect-timeout = 5
+max-retries = 20
+retry-delay = 0.1
