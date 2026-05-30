@@ -133,12 +133,24 @@ git_blocking_status() {
   local root rel status
   root="$(git_repo_root)"
   rel="$(workflow_rel_path "$root" || true)"
-  if [[ "$rel" == ".codex-jobs" || "$rel" == ".codex-jobs/"* ]]; then
-    rel=".codex-jobs"
-  fi
 
   if [[ -n "$rel" ]]; then
-    status="$(git -C "$root" status --porcelain --untracked-files=all -- . ":(exclude)$rel" ":(exclude)$rel/**")"
+    local pathspecs=(
+      .
+      ":(exclude)$rel/.runtime"
+      ":(exclude)$rel/.runtime/**"
+      ":(exclude)$rel/logs"
+      ":(exclude)$rel/logs/**"
+      ":(exclude)$rel/rollbacks"
+      ":(exclude)$rel/rollbacks/**"
+    )
+    local progress_job jobs_tsv_rel
+    progress_job="$(first_job_with_status Progress || true)"
+    if [[ -n "$progress_job" ]]; then
+      jobs_tsv_rel="$(workflow_file_rel_path "$root" "$JOBS_FILE" || true)"
+      [[ -n "$jobs_tsv_rel" ]] && pathspecs+=(":(exclude)$jobs_tsv_rel")
+    fi
+    status="$(git -C "$root" status --porcelain --untracked-files=all -- "${pathspecs[@]}")"
   else
     status="$(git -C "$root" status --porcelain --untracked-files=all)"
   fi

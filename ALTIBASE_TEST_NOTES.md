@@ -4,26 +4,26 @@
 
 ## 목적
 
-`py-tpcc`를 로컬 Altibase 서버(`/home/et16/work/altidev4`, port `20101`) 대상으로 실행하고, Python 접속 경로를 다음 두 가지로 비교할 수 있는지 확인했다.
+`py-tpcc`를 로컬 Altibase 서버(`/home/et16/work/altidev4`, port `$ALTIBASE_PORT_NO`) 대상으로 실행하고, Python 접속 경로를 다음 두 가지로 비교할 수 있는지 확인했다.
 
 - `pyodbc`
 - `/home/et16/work/altibase-python-driver`
 
 ## 현재 환경 확인
 
-Altibase 서버는 `20101` 포트에서 실행 중이다.
+Altibase 서버는 `ALTIBASE_PORT_NO`가 가리키는 포트에서 실행 중이다. 현재 확인 값은 `20104`이다.
 
 ```bash
-ss -ltnp | rg ':(20101|20300|17730)\b'
+test -n "${ALTIBASE_PORT_NO:-}" && ss -ltnp | rg ":(${ALTIBASE_PORT_NO}|20300|17730)\b"
 ```
 
 확인 결과:
 
 ```text
-LISTEN 0 128 0.0.0.0:20101 0.0.0.0:* users:(("altibase",pid=1693054,fd=54))
+LISTEN 0 128 0.0.0.0:20104 0.0.0.0:* users:(("altibase",pid=680140,fd=51))
 ```
 
-ODBC 설정도 이미 존재한다.
+ODBC 설정은 다음처럼 등록되어 있다.
 
 ```text
 /etc/odbcinst.ini
@@ -31,11 +31,9 @@ ODBC 설정도 이미 존재한다.
 Driver=/home/et16/work/altidev4/altibase_home/lib/libaltibase_odbc-64bit-ul64.so
 
 /etc/odbc.ini
-[ALTIBASE_LOCAL_20101]
+[ALTIBASE_LOCAL]
 Driver=ALTIBASE_HDB_ODBC_64bit
 Server=127.0.0.1
-Port=20101
-PORT_NO=20101
 Database=mydb
 NLS_USE=US7ASCII
 LongDataCompat=ON
@@ -45,7 +43,7 @@ LongDataCompat=ON
 
 시스템 Python 기준:
 
-- `pyodbc`는 설치되어 있음: `5.3.0`, `paramstyle=qmark`
+- `pyodbc`는 설치되어 있음: `5.1.0`, `paramstyle=qmark`
 - `altibase` 모듈은 전역 Python에 설치되어 있지 않음
 - `PYTHONPATH=/home/et16/work/altibase-python-driver/src`를 주면 import 가능
 
@@ -66,19 +64,19 @@ export PYTHONPATH=/home/et16/work/altibase-python-driver/src
 DSN 연결은 성공했다.
 
 ```python
-pyodbc.connect("DSN=ALTIBASE_LOCAL_20101;UID=SYS;PWD=MANAGER")
+pyodbc.connect("DSN=ALTIBASE_LOCAL;UID=SYS;PWD=MANAGER")
 ```
 
 `SELECT 1 FROM dual` 결과:
 
 ```text
-ok DSN=ALTIBASE_LOCAL_20101 (1,)
+ok DSN=ALTIBASE_LOCAL (1,)
 ```
 
 드라이버명을 직접 넣은 연결 문자열은 실패했다.
 
 ```text
-Driver=ALTIBASE_HDB_ODBC_64bit;Server=127.0.0.1;Port=20101;...
+Driver=ALTIBASE_HDB_ODBC_64bit;Server=127.0.0.1;Port=${ALTIBASE_PORT_NO};...
 ```
 
 오류:
@@ -94,9 +92,11 @@ HY024 Invalid attribute value
 키워드 연결과 raw connection string 연결 모두 성공했다.
 
 ```python
+import os
+
 altibase.connect(
     host="127.0.0.1",
-    port=20101,
+    port=int(os.environ["ALTIBASE_PORT_NO"]),
     user="SYS",
     password="MANAGER",
     nls_use="UTF8",
@@ -110,6 +110,17 @@ altibase.connect(
 ok kwargs (1,)
 ok connstr (1,)
 ```
+
+2026-05-30 재확인:
+
+- `PYTHONPATH=/home/et16/work/altibase-python-driver/src`로 import 성공
+- `altibase.Connection`, `altibase.Cursor` 사용 가능
+- `SELECT 1 FROM dual` 결과 `(1,)`
+- `driver_info().dbms_name` 결과 `Altibase`
+- `ping(roundtrip=True)` 결과 `True`
+- `/home/et16/work/altibase-python-driver/.venv/bin/python -m pytest -q tests/test_integration_connection.py::test_connection_close_is_idempotent tests/test_integration_connection.py::test_connection_information_and_health_methods_against_server` 결과 `2 passed`
+- `ALTIBASE_PASSWORD`를 설정한 `python3 -m altibase.diagnose --server-probe`는 server probe를 `OK connected and SELECT 1 FROM DUAL returned a row`로 보고함
+- 단, 전체 diagnose 결과는 SDK include 디렉터리에 `sqlcli.h`가 없어 `Build-time SDK: FAIL`이다. 현재 runtime import와 server connection에는 문제가 없지만, 새 native extension rebuild에는 header 보강이 필요하다.
 
 ## py-tpcc 구조 확인
 
@@ -211,11 +222,11 @@ Invalid literal
 4. config 예시 추가
    - native:
      - host `127.0.0.1`
-     - port `20101`
+     - port from `ALTIBASE_PORT_NO`
      - user/password
      - nls_use `UTF8`
    - pyodbc:
-     - dsn `ALTIBASE_LOCAL_20101`
+     - dsn `ALTIBASE_LOCAL`
      - user/password
 
 ## 실행 예시 초안
@@ -226,6 +237,7 @@ Native driver 경로:
 cd /home/et16/work/py-tpcc/pytpcc
 
 ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
+ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
 LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
 PYTHONPATH=/home/et16/work/altibase-python-driver/src \
 python3 tpcc.py --config altibase-native.config --ddl tpcc_altibase.sql \
@@ -239,6 +251,7 @@ pyodbc 경로:
 cd /home/et16/work/py-tpcc/pytpcc
 
 ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
+ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
 LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
 python3 tpcc.py --config altibase-pyodbc.config --ddl tpcc_altibase.sql \
   --reset --warehouses 1 --scalefactor 100 --duration 10 --clients 1 \
@@ -250,9 +263,10 @@ python3 tpcc.py --config altibase-pyodbc.config --ddl tpcc_altibase.sql \
 ## 주의 사항
 
 - `/home/et16/work/altibase-python-driver`는 `altibase` 모듈 import와 기본 연결은 성공했지만, `CREATE USER/GRANT/DROP USER` 후 프로세스 종료 시 한 차례 segfault가 관찰되었다.
+- 이후 짧은 connection integration pytest 2건은 통과했으며, 단순 connection close/info/ping 경로에서는 재현되지 않았다.
 - 일반 `SELECT`, DDL 생성, `DATE` 바인딩, 기본 insert 검증은 가능했다.
 - TPC-C 실행 전에 단일 클라이언트, 작은 scale factor로 load-only와 execute-only를 분리해서 검증하는 것이 좋다.
 
 ## 결론
 
-현재 환경은 Altibase `20101`에 대해 두 Python 접속 경로 모두 기본 연결이 가능하다. 다만 `py-tpcc`에는 Altibase 드라이버가 없고 기본 DDL도 Altibase와 맞지 않으므로, Altibase 전용 DDL과 DB-API 드라이버를 추가해야 실제 TPC-C load/workload 비교를 진행할 수 있다.
+현재 환경은 `ALTIBASE_PORT_NO`가 가리키는 Altibase에 대해 두 Python 접속 경로 모두 기본 연결이 가능하다. 다만 `py-tpcc`에는 Altibase 드라이버가 없고 기본 DDL도 Altibase와 맞지 않으므로, Altibase 전용 DDL과 DB-API 드라이버를 추가해야 실제 TPC-C load/workload 비교를 진행할 수 있다.

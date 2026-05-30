@@ -6,7 +6,9 @@
 
 `/home/et16/work/altibase-python-driver`는 현재 변경 작업 중이라 기준 드라이버로 사용할 수 없다. 따라서 `py-tpcc`의 Altibase 대응은 먼저 `pyodbc` 하나만 대상으로 진행한다.
 
-이 문서는 `pyodbc`로 Altibase `20101`에 TPC-C 스키마 생성, 데이터 적재, 트랜잭션 실행까지 통과시키기 위한 실행 상세 계획이다. Native `altibase` Python driver 비교는 pyodbc 경로가 안정화된 뒤 후속 작업으로 분리한다.
+이 문서는 `pyodbc`로 `ALTIBASE_PORT_NO`가 가리키는 로컬 Altibase에 TPC-C 스키마 생성, 데이터 적재, 트랜잭션 실행까지 통과시키기 위한 실행 상세 계획이다. Native `altibase` Python driver 비교는 pyodbc 경로가 안정화된 뒤 후속 작업으로 분리한다.
+
+2026-05-30 보강: `/home/et16/work/altibase-python-driver`의 기본 연결과 짧은 integration smoke가 다시 확인되었다. 따라서 `.codex-jobs/altibase-pyodbc-tpcc` workflow는 `J001`-`J004`에서 pyodbc baseline을 먼저 만든 뒤, `J005`-`J006`에서 native backend와 pyodbc/native 비교 실행을 추가한다.
 
 관련 사전 조사 문서:
 
@@ -20,10 +22,11 @@
 4. `--reset`, `--no-execute`, `--no-load` 조합으로 schema reset, load-only, execute-only를 각각 검증한다.
 5. 작은 scale부터 시작해서 단일 클라이언트 실행을 먼저 안정화한다.
 6. 기존 결과 출력 경로에 Altibase를 연결해 pyodbc baseline의 tpmC, retry, abort 수치를 남긴다.
+7. pyodbc baseline이 통과한 뒤 같은 DDL과 transaction SQL을 `/home/et16/work/altibase-python-driver` backend로도 실행해 비교 가능한 결과를 남긴다.
 
 ## 비목표
 
-- `altibase-python-driver` 사용
+- `J001`-`J004`에서 `altibase-python-driver`를 섞어 pyodbc baseline 안정화를 지연시키는 것
 - PostgreSQL/SQLite/MongoDB 기존 드라이버 리팩터링
 - TPC-C 공식 인증 수준의 엄격한 benchmark run
 - 대규모 병렬 load 최적화
@@ -36,21 +39,21 @@ Altibase 서버:
 ```text
 ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home
 host=127.0.0.1
-port=20101
+port=$ALTIBASE_PORT_NO
 ```
 
 ODBC 설정:
 
 ```text
-DSN=ALTIBASE_LOCAL_20101
+DSN=ALTIBASE_LOCAL
 Driver=ALTIBASE_HDB_ODBC_64bit
-PORT_NO=20101
+PORT_NO is intentionally omitted so the Altibase ODBC driver reads ALTIBASE_PORT_NO.
 ```
 
 연결은 다음 방식이 성공했다.
 
 ```python
-pyodbc.connect("DSN=ALTIBASE_LOCAL_20101;UID=SYS;PWD=MANAGER")
+pyodbc.connect("DSN=ALTIBASE_LOCAL;UID=SYS;PWD=MANAGER")
 ```
 
 드라이버명을 직접 넣은 연결 문자열은 `HY024 Invalid attribute value`로 실패했으므로 1차 구현은 DSN 기반으로 제한한다.
@@ -79,7 +82,7 @@ python3 tpcc.py --config altibase-pyodbc.config --ddl tpcc_altibase.sql altibase
 
 ```ini
 [altibase]
-dsn = ALTIBASE_LOCAL_20101
+dsn = ALTIBASE_LOCAL
 user = PYTPCC
 password = PYTPCC
 connection-timeout = 5
@@ -88,7 +91,7 @@ retry-delay = 0.1
 fast-executemany = False
 ```
 
-초기에는 `DSN=...;UID=...;PWD=...` 형태만 생성한다. `Server/Port/Driver` 직접 연결은 사전 조사에서 실패했으므로 구현하지 않는다.
+초기에는 `DSN=...;UID=...;PWD=...` 형태만 생성한다. `Server/Port/Driver` 직접 연결은 사전 조사에서 실패했으므로 구현하지 않는다. 포트는 config나 connection string에 넣지 않고 `ALTIBASE_PORT_NO` 환경변수에서 읽히게 둔다.
 
 `pyodbc` import는 module import 시점이 아니라 `_connect()` 또는 `loadConfig()`에서 lazy import한다. 그래야 `python3 tpcc.py --print-config altibase`가 실제 ODBC runtime 없이도 config 출력까지는 도달하고, pyodbc 누락 오류도 연결 단계에서 명확하게 제어할 수 있다.
 
@@ -241,7 +244,7 @@ pyodbc 기반 Altibase driver.
 
 ```ini
 [altibase]
-dsn = ALTIBASE_LOCAL_20101
+dsn = ALTIBASE_LOCAL
 user = PYTPCC
 password = PYTPCC
 connection-timeout = 5
@@ -259,6 +262,14 @@ fast-executemany = False
 - `README.md`에 Altibase pyodbc 실행 섹션 추가 또는 별도 문서 링크
 - 이 설계 문서와 `ALTIBASE_TEST_NOTES.md` 유지
 
+### 6. 후속 native backend 비교
+
+pyodbc baseline 검증 뒤 `J005`에서 `pytpcc/drivers/altibasedriver.py`에 `backend = native`를 추가한다. 기본값은 계속 `backend = pyodbc`로 두어 기존 pyodbc config와 실행 명령이 깨지지 않게 한다.
+
+Native backend는 `/home/et16/work/altibase-python-driver/src`를 `PYTHONPATH`에 추가한 상태에서 lazy import한다. 연결은 DSN이 아니라 `altibase.connect(host=..., port=..., user=..., password=..., nls_use=..., connect_timeout=...)` keyword 방식으로 수행한다. 포트는 pyodbc baseline과 동일하게 `ALTIBASE_PORT_NO`를 기준으로 한다.
+
+`J006`은 같은 DDL, 같은 schema credentials, 같은 `warehouses/scalefactor/duration/clients` 값으로 pyodbc와 native backend를 각각 reset/load/execute하고 결과를 비교한다. 이는 개발용 side-by-side smoke/performance comparison이며 TPC-C 공식 인증 benchmark가 아니다.
+
 ## 상세 실행 계획
 
 ### Phase 0. 기준 환경 고정
@@ -269,11 +280,12 @@ fast-executemany = False
 
 ```bash
 export ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home
+test -n "${ALTIBASE_PORT_NO:-}" || { echo "ALTIBASE_PORT_NO is required"; exit 1; }
 export LD_LIBRARY_PATH="$ALTIBASE_HOME/lib:${LD_LIBRARY_PATH:-}"
 
 python3 - <<'PY'
 import pyodbc
-cn = pyodbc.connect("DSN=ALTIBASE_LOCAL_20101;UID=SYS;PWD=MANAGER", timeout=5)
+cn = pyodbc.connect("DSN=ALTIBASE_LOCAL;UID=SYS;PWD=MANAGER", timeout=5)
 cur = cn.cursor()
 cur.execute("SELECT 1 FROM dual")
 print(cur.fetchone())
@@ -351,6 +363,7 @@ python3 tpcc.py --print-config altibase
 cd /home/et16/work/py-tpcc/pytpcc
 
 ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
+ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
 LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
 python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
   --reset --no-load --no-execute altibase --debug
@@ -373,6 +386,7 @@ python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
 cd /home/et16/work/py-tpcc/pytpcc
 
 ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
+ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
 LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
 python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
   --reset --no-execute --warehouses 1 --scalefactor 100 \
@@ -429,6 +443,7 @@ SELECT COUNT(*) FROM ORDER_LINE;
 cd /home/et16/work/py-tpcc/pytpcc
 
 ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
+ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
 LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
 python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
   --no-load --warehouses 1 --scalefactor 100 \
@@ -452,6 +467,7 @@ python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
 cd /home/et16/work/py-tpcc/pytpcc
 
 ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
+ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
 LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
 python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
   --reset --warehouses 1 --scalefactor 100 \
@@ -475,6 +491,7 @@ python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
 cd /home/et16/work/py-tpcc/pytpcc
 
 ALTIBASE_HOME=/home/et16/work/altidev4/altibase_home \
+ALTIBASE_PORT_NO=${ALTIBASE_PORT_NO:?} \
 LD_LIBRARY_PATH=/home/et16/work/altidev4/altibase_home/lib:${LD_LIBRARY_PATH:-} \
 python3 tpcc.py --config ALTIBASE_ODBC_EXAMPLE --ddl tpcc_altibase.sql \
   --reset --warehouses 2 --scalefactor 100 \
