@@ -34,7 +34,7 @@
 | --- | --- | --- | --- |
 | `J001` | `Done` | Altibase DDL and config | Create Altibase-specific TPC-C DDL and pyodbc config example, then validate schema syntax against the local Altibase DSN where available. |
 | `J002` | `Done` | Altibase driver reset and load | Add the pyodbc-backed Altibase driver with DSN connection, schema reset, DDL execution, loadTuples, loadFinish, cleanup, and basic driver discovery. |
-| `J003` | `ToDo` | TPC-C transaction implementation | Implement and validate the five TPC-C transaction methods for Altibase using qmark SQL, bounded retry, rollback handling, and correct New Order abort behavior. |
+| `J003` | `Done` | TPC-C transaction implementation | Implement and validate the five TPC-C transaction methods for Altibase using qmark SQL, bounded retry, rollback handling, and correct New Order abort behavior. |
 | `J004` | `ToDo` | Results integration and smoke runs | Integrate Altibase into result summaries, add single-client cleanup, run reset/load/execute smoke checks, update docs, and commit the verified baseline. |
 | `J005` | `ToDo` | Native Altibase driver backend | Extend the Altibase TPC-C target so it can run through `/home/et16/work/altibase-python-driver` while preserving the pyodbc baseline. |
 | `J006` | `ToDo` | pyodbc/native comparison runs | Run comparable pyodbc and native Altibase TPC-C smoke/performance runs, capture the results, and document how to repeat the comparison. |
